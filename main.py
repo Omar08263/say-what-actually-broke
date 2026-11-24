@@ -5,16 +5,25 @@ brutal truth, 1-200 characters) to /output/entry.txt (or
 $MAKEFUN_OUTPUT_DIR/entry.txt when set, for local runs).
 Deterministic: the same bytes on every run; no network, no randomness,
 no reads outside this file.
+
+The line (123 characters, 125 UTF-8 bytes, one line, ends with a full stop):
+    The server's disk is full, so it can't save anything — not even this
+    error message. Try again once we've deleted something.
 """
 
 import os
+import stat
 
 LINE = "The server's disk is full, so it can't save anything \u2014 not even this error message. Try again once we've deleted something."
 
-# Gate the line itself: 1-200 characters, not only whitespace, one line.
+# Gate the line itself, mirroring the sealed scorer: 1-200 characters of
+# UTF-8 text, not only whitespace, a single line, no control characters
+# (an error dialog must show every character it is given).
 assert 1 <= len(LINE) <= 200, f"line is {len(LINE)} chars, must be 1-200"
 assert LINE.strip(), "line must not be only whitespace"
 assert "\n" not in LINE, "line must be a single line"
+assert all(ord(ch) >= 0x20 or ch in "\t" for ch in LINE), "line must hold no control characters"
+assert len(LINE.encode("utf-8")) <= 200, "line must be at most 200 UTF-8 bytes in the gate's count"
 assert LINE.rstrip("'").endswith("."), "line must end with a full stop"
 
 
@@ -27,8 +36,12 @@ def main() -> None:
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(LINE)
     # Deterministic permissions for the grader: the entry must be readable
-    # (0644) no matter what umask the sandbox runs with.
+    # (0644) no matter what umask the sandbox runs with. Assert the mode
+    # the program itself set, so a silent chmod failure is loud, not a
+    # mystery "not readable" from the grader.
     os.chmod(path, 0o644)
+    if stat.S_IMODE(os.stat(path).st_mode) != 0o644:
+        raise SystemExit("entry.txt mode is not 0644 after chmod")
     # Read-back check: the file on disk must hold exactly the approved
     # line, byte for byte; otherwise fail loudly, never silently.
     with open(path, "r", encoding="utf-8", newline="\n") as f:
